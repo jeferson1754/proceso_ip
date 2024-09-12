@@ -16,10 +16,7 @@ import os
 import re
 
 
-def abrir_y_ejecutar_scanner():
-    # Ruta al ejecutable de Advanced IP Scanner
-    executable_path = r"C:\Program Files (x86)\Advanced IP Scanner\advanced_ip_scanner.exe"
-
+def abrir_y_ejecutar_scanner(executable_path):
     # Inicia el programa
     os.startfile(executable_path)
 
@@ -36,14 +33,14 @@ def abrir_y_ejecutar_scanner():
     print(f"El escaneo comenzó a las {dia} {hora}.")
 
 
-def esperar_termino_scanner(max_intentos=15, max_carpetas=10, tiempo_espera=30):
+def esperar_termino_scanner(file_path,imagen_boton,max_intentos=15, max_carpetas=10, tiempo_espera=30):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
     logger.info("Esperando a que termine el escaneo...")
 
-    csv_file_path = r"C:\Users\jvargas\Documents\ip.csv"
-    button_image_path = r'C:\Users\jvargas\Phyton\proceso_ip\btn.png'
+    csv_file_path = file_path
+    button_image_path = imagen_boton
 
     for intento in range(max_intentos):
         try:
@@ -169,7 +166,7 @@ def mostrar_graficos(df):
     colors = [color_map[estado] for estado in conteo_estado.index]
 
     # Crear la figura y los subgráficos
-    fig, axs = plt.subplots(2, 2, figsize=(14, 12))
+    fig, axs = plt.subplots(2, 2, figsize=(16, 14))
 
     # Gráfico de barras
     conteo_estado.plot(kind='bar', color=colors, ax=axs[0, 0])
@@ -190,50 +187,83 @@ def mostrar_graficos(df):
 
     # Gráfico de barras apiladas
     df['Segmento'] = df['IP'].apply(lambda x: '.'.join(
-        x.split('.')[:3]) if pd.notna(x) else 'Desconocido')
+        x.split('.')[:3]) + '.0/24' if pd.notna(x) else 'Desconocido')
     conteo_segmentos_estados = df.groupby(
         ['Segmento', 'Estado']).size().unstack(fill_value=0)
     estados_presentes = [
         estado for estado in estado_order if estado in conteo_segmentos_estados.columns]
     conteo_segmentos_estados = conteo_segmentos_estados[estados_presentes]
 
-    def annotate_bar(sel, conteo_segmentos_estados):
-        """Anotar barras en el gráfico de barras apiladas."""
-        artist = sel.artist
-        if isinstance(artist, patches.Rectangle):
-            height = artist.get_height()
-            segment_index = int(sel.artist.get_bbox().x0 // 1)
-            estado_index = int(sel.artist.get_bbox().y0 % 1)
-            segmento = conteo_segmentos_estados.index[segment_index]
-            estado = conteo_segmentos_estados.columns[estado_index]
-            sel.annotation.set_text(f'{estado}: {int(height)}\n{segmento}')
-            sel.annotation.xy = (
-                artist.get_x() + artist.get_width() / 2, height + 0.5)
-            sel.annotation.set_ha('center')
-            sel.annotation.set_va('bottom')
-        else:
-            sel.annotation.set_text('No disponible')
-
     ax_stacked = fig.add_subplot(2, 1, 2)
-    colors_segmento = [color_map[estado]
-                       for estado in conteo_segmentos_estados.columns]
-    conteo_segmentos_estados.plot(
-        kind='bar', stacked=True, ax=ax_stacked, color=colors_segmento)
-    ax_stacked.set_title('Conteo de Dispositivos por Segmento de IP y Estado')
+    plt.subplots_adjust(hspace=0.4)  # Aumentar el
+    
+    colors_segmento = [color_map[estado] for estado in conteo_segmentos_estados.columns]
+    bars = conteo_segmentos_estados.plot(kind='bar', stacked=True, ax=ax_stacked, color=colors_segmento)
+    ax_stacked.set_title('Conteo de Dispositivos por Segmento de IP y Estado', pad=10)  # Aumentar el padding del título
     ax_stacked.set_xlabel('Segmento de IP')
     ax_stacked.set_ylabel('Número de Dispositivos')
-    ax_stacked.set_xticklabels(
-        conteo_segmentos_estados.index, rotation=45, ha='right')
+    ax_stacked.set_xticklabels(conteo_segmentos_estados.index, rotation=45, ha='right')
     ax_stacked.set_xlim(-0.5, len(conteo_segmentos_estados.index) - 0.5)
+    
+        # Ajustar los límites del eje y para dar más espacio arriba
+    ylim = ax_stacked.get_ylim()
+    ax_stacked.set_ylim(ylim[0], ylim[1] * 1.1)  # Aumentar el límite superior en un 10%
+
+    annot = ax_stacked.annotate("", xy=(0,0), xytext=(20,20), textcoords="offset points",
+                                bbox=dict(boxstyle="round", fc="lightyellow", ec="orange", alpha=0.8, pad=0.5),
+                                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=.2", color="orange"))
+    annot.set_visible(False)
 
     handles, labels = ax_stacked.get_legend_handles_labels()
     ordered_handles = [handles[labels.index(
         estado)] for estado in estado_order if estado in labels]
+    
     ax_stacked.legend(ordered_handles, estado_order,
                       title='Estado', loc='upper left', bbox_to_anchor=(1, 1))
 
-    mplcursors.cursor(ax_stacked.patches, hover=True).connect(
-        "add", lambda sel: annotate_bar(sel, conteo_segmentos_estados))
+    def update_annot(bar, segmento, estado, valor):
+            x = bar.get_x() + bar.get_width() / 2.
+            y = bar.get_y() + bar.get_height() / 2.
+            
+            # Ajustar la posición vertical de la anotación
+            if y > ax_stacked.get_ylim()[1] * 0.7:  # Si la barra está en el 70% superior del gráfico
+                xytext = (20, -20)  # Colocar la anotación debajo de la barra
+            else:
+                xytext = (20, 20)  # Colocar la anotación encima de la barra
+            
+            annot.xyann = xytext
+            annot.xy = (x, y)
+            text = f"{estado}: {valor}\n{segmento}"
+            annot.set_text(text)
+            
+            # Ajustar el color de fondo según el estado
+            if estado == 'Activado':
+                annot.get_bbox_patch().set_facecolor('lightgreen')
+            elif estado == 'Inactivo':
+                annot.get_bbox_patch().set_facecolor('lightsalmon')
+            else:  # 'Desconocido'
+                annot.get_bbox_patch().set_facecolor('lightgray')
+            
+            annot.get_bbox_patch().set_alpha(0.9)
+
+    def hover(event):
+        vis = annot.get_visible()
+        if event.inaxes == ax_stacked:
+            for i, estado_bars in enumerate(bars.containers):
+                for j, bar in enumerate(estado_bars):
+                    if bar.contains(event)[0]:
+                        segmento = conteo_segmentos_estados.index[j]
+                        estado = conteo_segmentos_estados.columns[i]
+                        valor = int(bar.get_height())
+                        update_annot(bar, segmento, estado, valor)
+                        annot.set_visible(True)
+                        fig.canvas.draw_idle()
+                        return
+        if vis:
+            annot.set_visible(False)
+            fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("motion_notify_event", hover)
 
     fig.subplots_adjust(hspace=0.3)
     axs[1, 0].axis('off')
@@ -337,8 +367,8 @@ def mostrar_grafico_historico(file_path):
         return all_data
 
     # Leer los datos desde el archivo Excel
-    archivo = file_path
-    df = leer_datos_desde_excel(archivo)
+
+    df = leer_datos_desde_excel(file_path)
 
     # Convertir 'Conteo' a enteros
     df['Conteo'] = pd.to_numeric(
@@ -439,9 +469,7 @@ def mostrar_grafico_historico(file_path):
     plt.show()
 
 
-def terminar_proceso():
-    # Nombre del ejecutable de Advanced IP Scanner
-    nombre_proceso = "advanced_ip_scanner.exe"
+def terminar_proceso(nombre_proceso):
 
     # Usar taskkill para cerrar el proceso
     def cerrar_proceso(nombre_proceso):
@@ -462,12 +490,15 @@ def terminar_proceso():
 
 def main():
 
+    executable_path = r"C:\Program Files (x86)\Advanced IP Scanner\advanced_ip_scanner.exe"
     file_path = r'C:\Users\jvargas\Documents\ip.csv'
     excel_path = r"G:\Mi unidad\device_status_report.xlsx"
+    imagen_boton = r'C:\Users\jvargas\Phyton\proceso_ip\btn.png'
+    nombre_proceso = "advanced_ip_scanner.exe"
+    
+    abrir_y_ejecutar_scanner(executable_path)
 
-    abrir_y_ejecutar_scanner()
-
-    resultado_escaner = esperar_termino_scanner()
+    resultado_escaner = esperar_termino_scanner(file_path,imagen_boton)
     if resultado_escaner:
 
         def procesar_datos(file_path, excel_path):
@@ -479,14 +510,13 @@ def main():
                 plt.show()
 
                 # Exportar a Excel
-                exportar_a_excel(
-                    conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
+                #exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
 
                 # Mostrar gráficos historicos
                 mostrar_grafico_historico(excel_path)
 
         procesar_datos(file_path, excel_path)
-        terminar_proceso()
+        terminar_proceso(nombre_proceso)
         
         print(f"Proceso completado exitosamente")
     else:
