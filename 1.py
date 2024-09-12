@@ -77,7 +77,7 @@ def esperar_termino_scanner(max_intentos=15, max_carpetas=10, tiempo_espera=30):
 
 def guardar_archivo(csv_file_path, max_carpetas=10):
     logger = logging.getLogger(__name__)
-    
+
     pyautogui.click(293, 619)
     # Configuración de botones
     buttons = [
@@ -337,28 +337,27 @@ def mostrar_grafico_historico(file_path):
         return all_data
 
     # Leer los datos desde el archivo Excel
-    # Cambia esto por la ruta real de tu archivo Excel
-    archivo = r"G:\Mi unidad\device_status_report.xlsx"
+    archivo = file_path
     df = leer_datos_desde_excel(archivo)
 
     # Convertir 'Conteo' a enteros
     df['Conteo'] = pd.to_numeric(
         df['Conteo'], errors='coerce').fillna(0).astype(int)
 
-    # Verificar los datos después de la conversión
-    # print("Datos después de la conversión a enteros:")
-    # print(df.head())
-
     # Verificar si hay valores NaN en columnas importantes y limpiarlos
     df = df.dropna(subset=['Estado', 'Conteo'])
+
+    # Agrupar por 'Fecha y Hora' y 'Estado' y sumar los conteos
+    df_grouped = df.groupby(['Fecha y Hora', 'Estado'],
+                            as_index=False).agg({'Conteo': 'sum'})
 
     # Crear el gráfico
     fig, ax = plt.subplots(figsize=(12, 6))
 
     # Ajusta los datos para el gráfico
     lines = []
-    for estado in df['Estado'].unique():
-        df_estado = df[df['Estado'] == estado]
+    for estado in df_grouped['Estado'].unique():
+        df_estado = df_grouped[df_grouped['Estado'] == estado]
         line, = ax.plot(df_estado['Fecha y Hora'],
                         df_estado['Conteo'], label=estado, marker='o')
         lines.append(line)
@@ -385,7 +384,7 @@ def mostrar_grafico_historico(file_path):
         y_val = y[ind["ind"][0]]
 
         # Encuentra la fila en el DataFrame correspondiente a los datos de la línea
-        df_estado = df[df['Estado'] == line.get_label()]
+        df_estado = df_grouped[df_grouped['Estado'] == line.get_label()]
         fecha_hora = df_estado[df_estado['Fecha y Hora']
                                == x_val]['Fecha y Hora'].values[0]
 
@@ -404,7 +403,6 @@ def mostrar_grafico_historico(file_path):
         annot.get_bbox_patch().set_alpha(0.8)
 
     # Función para manejar los eventos del mouse
-
     def hover(event):
         vis = annot.get_visible()
         if event.inaxes == ax:
@@ -424,7 +422,7 @@ def mostrar_grafico_historico(file_path):
     # Configurar los botones de selección
     # Posición en la parte superior del gráfico
     rax = plt.axes([0.4, 0.80, 0.2, 0.1])
-    labels = df['Estado'].unique()
+    labels = df_grouped['Estado'].unique()
     visibility = [line.get_visible() for line in lines]
     check = CheckButtons(rax, labels, visibility)
 
@@ -437,7 +435,7 @@ def mostrar_grafico_historico(file_path):
     check.on_clicked(func)
 
     # Mostrar el gráfico
-    print(f"Mostrando Graficos Historicos.")
+    print("Mostrando Gráficos Históricos.")
     plt.show()
 
 
@@ -467,31 +465,32 @@ def main():
     file_path = r'C:\Users\jvargas\Documents\ip.csv'
     excel_path = r"G:\Mi unidad\device_status_report.xlsx"
 
-    #abrir_y_ejecutar_scanner()
-    '''
+    abrir_y_ejecutar_scanner()
+
     resultado_escaner = esperar_termino_scanner()
     if resultado_escaner:
-        print(f"Proceso completado exitosamente")
 
         def procesar_datos(file_path, excel_path):
             df = cargar_datos(file_path)
             if df is not None:
-                # Mostrar gráficos
+                # Mostrar gráficos actuales
                 fig, conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados = mostrar_graficos(
                     df)
                 plt.show()
 
                 # Exportar a Excel
-                # exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
+                exportar_a_excel(
+                    conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
+
+                # Mostrar gráficos historicos
+                mostrar_grafico_historico(excel_path)
 
         procesar_datos(file_path, excel_path)
-
+        terminar_proceso()
+        
+        print(f"Proceso completado exitosamente")
     else:
         print("El proceso no pudo completarse.")
-    '''
-    mostrar_grafico_historico(excel_path)
-
-    # terminar_proceso()
 
 
 if __name__ == "__main__":
