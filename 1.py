@@ -510,7 +510,7 @@ def main():
                 plt.show()
 
                 # Exportar a Excel
-                #exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
+                exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
 
                 # Mostrar gráficos historicos
                 mostrar_grafico_historico(excel_path)
