@@ -323,19 +323,33 @@ def exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_e
 
     # Reordenar las hojas para que la fecha más reciente esté primero
     def extraer_fecha(nombre_hoja):
-        """Extraer fecha del nombre de la hoja en formato 'Estado_YYYY-MM-DD_HH-MM-SS'."""
+        """Extraer fecha del nombre de la hoja en formato 'Estado_YYYY-MM-DD_HH-MM-SS' o 'Segmento_YYYY-MM-DD_HH-MM-SS'."""
         try:
-            return datetime.strptime(nombre_hoja.split('_')[-1], "%Y-%m-%d_%H-%M-%S")
-        except ValueError:
+            return datetime.strptime(nombre_hoja.split('_', 1)[1], "%Y-%m-%d_%H-%M-%S")
+        except (ValueError, IndexError):
             return datetime.min
 
-    hojas_con_fechas = [
-        hoja for hoja in wb.sheetnames if "Estado_" in hoja or "Segmento_" in hoja]
-    hojas_con_fechas.sort(key=extraer_fecha, reverse=True)
+    # Recolectar todas las hojas con fechas
+    hojas_con_fechas = []
+    for hoja in wb.sheetnames:
+        if hoja.startswith("Estado_") or hoja.startswith("Segmento_"):
+            fecha = extraer_fecha(hoja)
+            if fecha != datetime.min:
+                hojas_con_fechas.append((hoja, fecha))
 
-    # Mover las hojas en el orden correcto (primero las más recientes)
-    for hoja in hojas_con_fechas:
-        wb.move_sheet(wb[hoja], offset=-wb.index(wb[hoja]))
+    # Ordenar las hojas por fecha, más reciente primero
+    hojas_con_fechas.sort(key=lambda x: x[1], reverse=True)
+
+    # Mover las hojas en el orden correcto
+    for i, (hoja, _) in enumerate(hojas_con_fechas):
+        wb.move_sheet(wb[hoja], offset=-wb.index(wb[hoja]) + i)
+
+    # Verificación final
+    for i in range(len(hojas_con_fechas) - 1):
+        fecha_actual = extraer_fecha(wb.sheetnames[i])
+        fecha_siguiente = extraer_fecha(wb.sheetnames[i+1])
+        if fecha_actual < fecha_siguiente:
+            print(f"Advertencia: La hoja {wb.sheetnames[i]} está fuera de orden.")
 
     # Guardar el archivo Excel
     wb.save(excel_path)
@@ -491,6 +505,7 @@ def terminar_proceso(nombre_proceso):
 def main():
 
     executable_path = r"C:\Program Files (x86)\Advanced IP Scanner\advanced_ip_scanner.exe"
+    
     file_path = r'C:\Users\jvargas\Documents\ip.csv'
     excel_path = r"G:\Mi unidad\device_status_report.xlsx"
     imagen_boton = r'C:\Users\jvargas\Phyton\proceso_ip\btn.png'
