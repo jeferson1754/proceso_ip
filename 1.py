@@ -1,9 +1,9 @@
 from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from matplotlib.widgets import CheckButtons
 import matplotlib.pyplot as plt
 from matplotlib import patches
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 import mplcursors
@@ -33,7 +33,7 @@ def abrir_y_ejecutar_scanner(executable_path):
     print(f"El escaneo comenzó a las {dia} {hora}.")
 
 
-def esperar_termino_scanner(file_path,imagen_boton,max_intentos=15, max_carpetas=10, tiempo_espera=30):
+def esperar_termino_scanner(file_path, imagen_boton, max_intentos=15, max_carpetas=10, tiempo_espera=30):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
@@ -147,20 +147,121 @@ def cargar_datos(file_path):
         return None
 
 
-def mostrar_graficos(df):
+def calcular_conteos(df):
     """Generar gráficos de barras, circular y de barras apiladas para el estado de los dispositivos."""
     if df is None or 'Estado' not in df.columns:
         print("Columna 'Estado' no encontrada en el DataFrame.")
         return None
-
-    # Conteo de estados
+    # Calcular las variables
     conteo_estado = df['Estado'].value_counts()
     conteo_estado_porcentaje = df['Estado'].value_counts(normalize=True)
 
-    # Orden de los estados y colores correspondientes
+    df['Segmento'] = df['IP'].apply(lambda x: '.'.join(
+        x.split('.')[:3]) + '.0/24' if pd.notna(x) else 'Desconocido')
+    conteo_segmentos_estados = df.groupby(
+        ['Segmento', 'Estado']).size().unstack(fill_value=0)
+
+    # Mostrar las variables en la consola
+    '''
+    print("Conteo de Estados:")
+    print(conteo_estado)
+    print("\nPorcentaje de Estados:")
+    print(conteo_estado_porcentaje)
+    print("\nConteo de Estados por Segmento:")
+    print(conteo_segmentos_estados)
+    '''
+    return conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados
+
+
+def formatear_hoja(ws, num_rows):
+    """Formatear una hoja de cálculo de Excel."""
+  # Alinear los porcentajes a la derecha
+    for row in ws.iter_rows(min_row=2, min_col=2, max_col=4, max_row=num_rows + 1):
+        for cell in row:
+            cell.alignment = Alignment(horizontal='right')
+
+    # Alinear Totales y Porcentajes a la derecha
+    for cell in ws['B'][num_rows - 2:]:
+        cell.alignment = Alignment(horizontal='right')
+    for cell in ws['B'][num_rows - 1:]:
+        cell.alignment = Alignment(horizontal='right')
+
+    # Ajustar el ancho de las columnas
+    for column in ws.columns:
+        max_length = max(len(str(cell.value)) for cell in column)
+        ws.column_dimensions[column[0].column_letter].width = max_length + 2
+
+
+def exportar_a_excel(conteo_segmentos_estados, excel_path):
+    """Exportar datos a un archivo Excel, colocando la fecha actual primero."""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Crear o cargar el archivo Excel
+    if os.path.exists(excel_path):
+        wb = openpyxl.load_workbook(excel_path)
+    else:
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
+
+    # Crear o cargar la hoja de "Conteos"
+    ws_conteos = wb.create_sheet(title=f"Conteos_{timestamp}", index=0)
+
+    # Crear el DataFrame combinado
+    df_conteos = pd.DataFrame({
+        'Segmento': conteo_segmentos_estados.index,
+        'Activado': conteo_segmentos_estados['Activado'],
+        'Inactivo': conteo_segmentos_estados['Inactivo'],
+        'Desconocido': conteo_segmentos_estados['Desconocido']
+    })
+
+    # Añadir la fila de totales
+    df_conteos.loc['Totales'] = df_conteos[[
+        'Activado', 'Inactivo', 'Desconocido']].sum()
+
+    # Calcular los porcentajes
+    total_activado = df_conteos['Activado'].sum()
+    total_inactivo = df_conteos['Inactivo'].sum()
+    total_desconocido = df_conteos['Desconocido'].sum()
+
+    total_general = total_activado + total_inactivo + total_desconocido
+
+    # Asegurarse de que los porcentajes sean calculados solo si hay un total mayor que cero
+    if total_general > 0:
+        porcentajes = [
+            f"{total_activado / total_general * 100:.2f}%",
+            f"{total_inactivo / total_general * 100:.2f}%",
+            f"{total_desconocido / total_general * 100:.2f}%"
+        ]
+    else:
+        porcentajes = ["0%", "0%", "0%"]
+
+    # Añadir la fila de porcentajes, asegurando que los valores están en la columna correcta
+    df_conteos.loc['Porcentajes'] = [
+        None, porcentajes[0], porcentajes[1], porcentajes[2]]
+
+    # Asegurar que las filas 'Totales' y 'Porcentajes' tengan su texto correspondiente
+    df_conteos.at['Totales', 'Segmento'] = 'Totales'
+    df_conteos.at['Porcentajes', 'Segmento'] = 'Porcentajes'
+
+    # Añadir los datos a la hoja de "Conteos"
+    for r in dataframe_to_rows(df_conteos, index=False, header=True):
+        ws_conteos.append(r)
+
+    # Formatear la hoja de "Conteos"
+    formatear_hoja(ws_conteos, len(df_conteos))
+
+    # Guardar el archivo Excel
+    wb.save(excel_path)
+    print(f"Datos exportados exitosamente a {excel_path}")
+
+
+def mostrar_graficos(conteo_estado, conteo_segmentos_estados):
+    """Generar gráficos de barras, circular y de barras apiladas para el estado de los dispositivos."""
+
     estado_order = ['Desconocido', 'Inactivo', 'Activado']
     color_map = {'Desconocido': 'red',
-                 'Inactivo': 'orange', 'Activado': 'green'}
+                 'Inactivo': 'orange',
+                 'Activado': 'green'}
 
     # Asignar los colores a cada estado
     colors = [color_map[estado] for estado in conteo_estado.index]
@@ -186,65 +287,61 @@ def mostrar_graficos(df):
     axs[0, 1].set_ylabel('')
 
     # Gráfico de barras apiladas
-    df['Segmento'] = df['IP'].apply(lambda x: '.'.join(
-        x.split('.')[:3]) + '.0/24' if pd.notna(x) else 'Desconocido')
-    conteo_segmentos_estados = df.groupby(
-        ['Segmento', 'Estado']).size().unstack(fill_value=0)
-    estados_presentes = [
-        estado for estado in estado_order if estado in conteo_segmentos_estados.columns]
-    conteo_segmentos_estados = conteo_segmentos_estados[estados_presentes]
-
     ax_stacked = fig.add_subplot(2, 1, 2)
-    plt.subplots_adjust(hspace=0.4)  # Aumentar el
-    
-    colors_segmento = [color_map[estado] for estado in conteo_segmentos_estados.columns]
-    bars = conteo_segmentos_estados.plot(kind='bar', stacked=True, ax=ax_stacked, color=colors_segmento)
-    ax_stacked.set_title('Conteo de Dispositivos por Segmento de IP y Estado', pad=10)  # Aumentar el padding del título
+    plt.subplots_adjust(hspace=0.4)  # Aumentar el espacio entre gráficos
+    colors_segmento = [color_map[estado]
+                       for estado in conteo_segmentos_estados.columns]
+    bars = conteo_segmentos_estados.plot(
+        kind='bar', stacked=True, ax=ax_stacked, color=colors_segmento)
+    ax_stacked.set_title(
+        'Conteo de Dispositivos por Segmento de IP y Estado', pad=10)
     ax_stacked.set_xlabel('Segmento de IP')
     ax_stacked.set_ylabel('Número de Dispositivos')
-    ax_stacked.set_xticklabels(conteo_segmentos_estados.index, rotation=45, ha='right')
+    ax_stacked.set_xticklabels(
+        conteo_segmentos_estados.index, rotation=45, ha='right')
     ax_stacked.set_xlim(-0.5, len(conteo_segmentos_estados.index) - 0.5)
-    
-        # Ajustar los límites del eje y para dar más espacio arriba
-    ylim = ax_stacked.get_ylim()
-    ax_stacked.set_ylim(ylim[0], ylim[1] * 1.1)  # Aumentar el límite superior en un 10%
 
-    annot = ax_stacked.annotate("", xy=(0,0), xytext=(20,20), textcoords="offset points",
-                                bbox=dict(boxstyle="round", fc="lightyellow", ec="orange", alpha=0.8, pad=0.5),
+    # Ajustar los límites del eje y para dar más espacio arriba
+    ylim = ax_stacked.get_ylim()
+    ax_stacked.set_ylim(ylim[0], ylim[1] * 1.1)
+
+    annot = ax_stacked.annotate("", xy=(0, 0), xytext=(20, 20), textcoords="offset points",
+                                bbox=dict(boxstyle="round", fc="lightyellow",
+                                          ec="orange", alpha=0.8, pad=0.5),
                                 arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=.2", color="orange"))
     annot.set_visible(False)
 
     handles, labels = ax_stacked.get_legend_handles_labels()
     ordered_handles = [handles[labels.index(
         estado)] for estado in estado_order if estado in labels]
-    
     ax_stacked.legend(ordered_handles, estado_order,
                       title='Estado', loc='upper left', bbox_to_anchor=(1, 1))
 
     def update_annot(bar, segmento, estado, valor):
-            x = bar.get_x() + bar.get_width() / 2.
-            y = bar.get_y() + bar.get_height() / 2.
-            
-            # Ajustar la posición vertical de la anotación
-            if y > ax_stacked.get_ylim()[1] * 0.7:  # Si la barra está en el 70% superior del gráfico
-                xytext = (20, -20)  # Colocar la anotación debajo de la barra
-            else:
-                xytext = (20, 20)  # Colocar la anotación encima de la barra
-            
-            annot.xyann = xytext
-            annot.xy = (x, y)
-            text = f"{estado}: {valor}\n{segmento}"
-            annot.set_text(text)
-            
-            # Ajustar el color de fondo según el estado
-            if estado == 'Activado':
-                annot.get_bbox_patch().set_facecolor('lightgreen')
-            elif estado == 'Inactivo':
-                annot.get_bbox_patch().set_facecolor('lightsalmon')
-            else:  # 'Desconocido'
-                annot.get_bbox_patch().set_facecolor('lightgray')
-            
-            annot.get_bbox_patch().set_alpha(0.9)
+        x = bar.get_x() + bar.get_width() / 2.
+        y = bar.get_y() + bar.get_height() / 2.
+
+        # Ajustar la posición vertical de la anotación
+        # Si la barra está en el 70% superior del gráfico
+        if y > ax_stacked.get_ylim()[1] * 0.7:
+            xytext = (20, -20)  # Colocar la anotación debajo de la barra
+        else:
+            xytext = (20, 20)  # Colocar la anotación encima de la barra
+
+        annot.xyann = xytext
+        annot.xy = (x, y)
+        text = f"{estado}: {valor}\n{segmento}"
+        annot.set_text(text)
+
+        # Ajustar el color de fondo según el estado
+        if estado == 'Activado':
+            annot.get_bbox_patch().set_facecolor('lightgreen')
+        elif estado == 'Inactivo':
+            annot.get_bbox_patch().set_facecolor('lightsalmon')
+        else:  # 'Desconocido'
+            annot.get_bbox_patch().set_facecolor('lightgray')
+
+        annot.get_bbox_patch().set_alpha(0.9)
 
     def hover(event):
         vis = annot.get_visible()
@@ -270,90 +367,7 @@ def mostrar_graficos(df):
     axs[1, 1].axis('off')
 
     print(f"Mostrando Graficos de Datos Recientes.")
-    return fig, conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados
-
-
-def exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path):
-    """Exportar datos a un archivo Excel, colocando la fecha actual primero."""
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-    # Crear o cargar el archivo Excel
-    if os.path.exists(excel_path):
-        wb = openpyxl.load_workbook(excel_path)
-    else:
-        wb = openpyxl.Workbook()
-        # Eliminar la hoja por defecto si es un nuevo archivo
-        wb.remove(wb.active)
-
-    # Crear la nueva hoja de conteo por estado
-    ws_estado = wb.create_sheet(title=f"Estado_{timestamp}")
-    df_estado = pd.DataFrame({
-        'Estado': conteo_estado.index,
-        'Conteo': conteo_estado.values,
-        'Porcentaje': conteo_estado_porcentaje.values
-    })
-
-    # Función para formatear las hojas de cálculo
-    def formatear_hoja(ws, has_percentage=False):
-        """Formatear una hoja de cálculo de Excel."""
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill(
-                start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-
-        for column in ws.columns:
-            max_length = max(len(str(cell.value)) for cell in column)
-            ws.column_dimensions[column[0].column_letter].width = max_length + 2
-
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=2, max_col=ws.max_column):
-            for cell in row:
-                if isinstance(cell.value, (int, float)):
-                    cell.number_format = '0.00%' if has_percentage and cell.column == 3 else '#,##0'
-
-    # Añadir datos y formatear la hoja de estado
-    for r in dataframe_to_rows(df_estado, index=False, header=True):
-        ws_estado.append(r)
-    formatear_hoja(ws_estado, has_percentage=True)
-
-    # Crear la nueva hoja de conteo por segmento y estado
-    ws_segmento = wb.create_sheet(title=f"Segmento_{timestamp}")
-    for r in dataframe_to_rows(conteo_segmentos_estados.reset_index(), index=False, header=True):
-        ws_segmento.append(r)
-    formatear_hoja(ws_segmento)
-
-    # Reordenar las hojas para que la fecha más reciente esté primero
-    def extraer_fecha(nombre_hoja):
-        """Extraer fecha del nombre de la hoja en formato 'Estado_YYYY-MM-DD_HH-MM-SS' o 'Segmento_YYYY-MM-DD_HH-MM-SS'."""
-        try:
-            return datetime.strptime(nombre_hoja.split('_', 1)[1], "%Y-%m-%d_%H-%M-%S")
-        except (ValueError, IndexError):
-            return datetime.min
-
-    # Recolectar todas las hojas con fechas
-    hojas_con_fechas = []
-    for hoja in wb.sheetnames:
-        if hoja.startswith("Estado_") or hoja.startswith("Segmento_"):
-            fecha = extraer_fecha(hoja)
-            if fecha != datetime.min:
-                hojas_con_fechas.append((hoja, fecha))
-
-    # Ordenar las hojas por fecha, más reciente primero
-    hojas_con_fechas.sort(key=lambda x: x[1], reverse=True)
-
-    # Mover las hojas en el orden correcto
-    for i, (hoja, _) in enumerate(hojas_con_fechas):
-        wb.move_sheet(wb[hoja], offset=-wb.index(wb[hoja]) + i)
-
-    # Verificación final
-    for i in range(len(hojas_con_fechas) - 1):
-        fecha_actual = extraer_fecha(wb.sheetnames[i])
-        fecha_siguiente = extraer_fecha(wb.sheetnames[i+1])
-        if fecha_actual < fecha_siguiente:
-            print(f"Advertencia: La hoja {wb.sheetnames[i]} está fuera de orden.")
-
-    # Guardar el archivo Excel
-    wb.save(excel_path)
-    print(f"Datos exportados exitosamente a {excel_path}")
+    plt.show()
 
 
 def mostrar_grafico_historico(file_path):
@@ -505,35 +519,48 @@ def terminar_proceso(nombre_proceso):
 def main():
 
     executable_path = r"C:\Program Files (x86)\Advanced IP Scanner\advanced_ip_scanner.exe"
-    
+
     file_path = r'C:\Users\jvargas\Documents\ip.csv'
     excel_path = r"G:\Mi unidad\device_status_report.xlsx"
     imagen_boton = r'C:\Users\jvargas\Phyton\proceso_ip\btn.png'
     nombre_proceso = "advanced_ip_scanner.exe"
-    
+
     abrir_y_ejecutar_scanner(executable_path)
 
-    resultado_escaner = esperar_termino_scanner(file_path,imagen_boton)
+    resultado_escaner = esperar_termino_scanner(file_path, imagen_boton)
     if resultado_escaner:
 
         def procesar_datos(file_path, excel_path):
+            # Cargar datos desde el archivo CSV
             df = cargar_datos(file_path)
             if df is not None:
                 # Mostrar gráficos actuales
-                fig, conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados = mostrar_graficos(
+                conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados = calcular_conteos(
                     df)
-                plt.show()
 
                 # Exportar a Excel
-                exportar_a_excel(conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados, excel_path)
+                exportar_a_excel(conteo_segmentos_estados, excel_path)
+
+                # Mostrar gráficos actuales
+                mostrar_graficos(conteo_estado, conteo_segmentos_estados)
 
                 # Mostrar gráficos historicos
                 mostrar_grafico_historico(excel_path)
+            else:
+                print("No se pudieron cargar los datos.")
 
+        # Llamar a la función de procesamiento
         procesar_datos(file_path, excel_path)
-        terminar_proceso(nombre_proceso)
-        
+
         print(f"Proceso completado exitosamente")
+        terminar_proceso(nombre_proceso)
+
+        # Calcular la próxima hora
+        proxima_hora = datetime.now() + timedelta(hours=2)
+        print()  # Espacio en blanco
+        print(f"Siguiente Escaneo a las {
+              proxima_hora.strftime('%H:%M')} horas.")
+
     else:
         print("El proceso no pudo completarse.")
 
