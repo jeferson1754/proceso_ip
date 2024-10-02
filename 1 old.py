@@ -370,71 +370,65 @@ def mostrar_graficos(conteo_estado, conteo_segmentos_estados):
     plt.show()
 
 
-def mostrar_grafico_historico(excel_path):
+def mostrar_grafico_historico(file_path):
 
-    def format_sheet_name(sheet_name):
-        # Extraer la parte de la fecha del nombre de la hoja (después de "Conteos_")
-        date_part = sheet_name.replace("Conteos_", "")
-        # Convertir el string a un objeto datetime
-        try:
-            dt = datetime.strptime(date_part, "%Y-%m-%d_%H-%M-%S")
-            return dt.strftime("%d-%m-%Y %H:%M:%S")
-        except ValueError as e:
-            print(f"Error parsing date for sheet '{sheet_name}': {e}")
-            return sheet_name
+    def leer_datos_desde_excel(archivo):
+        xls = pd.ExcelFile(archivo)
+        sheets = xls.sheet_names
 
-    # Leer todas las hojas del archivo Excel
-    xls = pd.ExcelFile(excel_path)
-    all_totals = []
+        data_frames = []
+        for sheet in sheets:
+            # Extraer la fecha y hora del nombre de la hoja usando regex
+            match = re.search(
+                r'_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})$', sheet)
+            if match:
+                fecha = match.group(1)
+                hora = match.group(2).replace('-', ':')
+                df = pd.read_excel(archivo, sheet_name=sheet)
+                df['Fecha y Hora'] = pd.to_datetime(
+                    f"{fecha} {hora}", format="%Y-%m-%d %H:%M:%S")
+                data_frames.append(df)
 
-    for sheet_name in xls.sheet_names:
-        # Leer cada hoja
-        df = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
+        # Concatenar todos los DataFrames en uno solo
+        all_data = pd.concat(data_frames, ignore_index=True)
 
-        totals_row = df.iloc[-2].tolist()
+        return all_data
 
-        try:
-            totals = {
-                'Tiempo': format_sheet_name(sheet_name),
-                'Activado': float(totals_row[1]) if isinstance(totals_row[1], (int, float)) else 0,
-                'Inactivo': float(totals_row[2]) if isinstance(totals_row[2], (int, float)) else 0,
-                'Desconocido': float(totals_row[3]) if isinstance(totals_row[3], (int, float)) else 0
-            }
-        except Exception as e:
-            print(f"Error processing totals for sheet '{sheet_name}': {e}")
-            continue
+    # Leer los datos desde el archivo Excel
 
-        all_totals.append(totals)
+    df = leer_datos_desde_excel(file_path)
 
-    df_totals = pd.DataFrame(all_totals)
-    df_totals['Tiempo'] = pd.to_datetime(
-        df_totals['Tiempo'], format='%d-%m-%Y %H:%M:%S')
-    df_totals = df_totals.sort_values('Tiempo')
+    # Convertir 'Conteo' a enteros
+    df['Conteo'] = pd.to_numeric(
+        df['Conteo'], errors='coerce').fillna(0).astype(int)
 
-    # Crear el gráfico con layout restringido
-    fig, ax = plt.subplots(figsize=(12, 6), constrained_layout=True)
+    # Verificar si hay valores NaN en columnas importantes y limpiarlos
+    df = df.dropna(subset=['Estado', 'Conteo'])
 
-    # Crear las líneas con marcadores
+    # Agrupar por 'Fecha y Hora' y 'Estado' y sumar los conteos
+    df_grouped = df.groupby(['Fecha y Hora', 'Estado'],
+                            as_index=False).agg({'Conteo': 'sum'})
+
+    # Crear el gráfico
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Ajusta los datos para el gráfico
     lines = []
-    lines.append(ax.plot(df_totals['Tiempo'], df_totals['Activado'],
-                         marker='o', label='Activado', linewidth=2, markersize=8)[0])
-    lines.append(ax.plot(df_totals['Tiempo'], df_totals['Inactivo'],
-                         marker='o', label='Inactivo', linewidth=2, markersize=8)[0])
-    lines.append(ax.plot(df_totals['Tiempo'], df_totals['Desconocido'],
-                         marker='o', label='Desconocido', linewidth=2, markersize=8)[0])
+    for estado in df_grouped['Estado'].unique():
+        df_estado = df_grouped[df_grouped['Estado'] == estado]
+        line, = ax.plot(df_estado['Fecha y Hora'],
+                        df_estado['Conteo'], label=estado, marker='o')
+        lines.append(line)
 
-    # Personalizar el gráfico
-    ax.set_title('Evolución histórica de totales de dispositivos',
-                 fontsize=14, pad=20)
-    ax.set_xlabel('Tiempo', fontsize=12)
-    ax.set_ylabel('Número de dispositivos', fontsize=12)
-    ax.grid(True, linestyle='--', alpha=0.7)
-    ax.legend(fontsize=10)
+    plt.xlabel('Fecha y Hora')
+    plt.ylabel('Conteo')
+    plt.title('Equipos en la red')
+    plt.legend()
+    plt.grid(True)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
 
-    # Rotar y ajustar las etiquetas del eje x para mejor legibilidad
-    plt.xticks(rotation=45, ha='right')
-
-    # Configurar las anotaciones
+    # Crear la anotación que aparecerá al pasar el mouse
     annot = ax.annotate("", xy=(0, 0), xytext=(20, 20),
                         textcoords="offset points",
                         bbox=dict(boxstyle="round", fc="w"),
@@ -442,30 +436,31 @@ def mostrar_grafico_historico(excel_path):
     annot.set_visible(False)
 
     # Función para actualizar la anotación
-
     def update_annot(line, ind):
         x, y = line.get_data()
         x_val = x[ind["ind"][0]]
         y_val = y[ind["ind"][0]]
 
-        # Convertir el valor y en un entero
-        y_val_int = int(y_val)
-
         # Encuentra la fila en el DataFrame correspondiente a los datos de la línea
-        df_estado = df_totals[df_totals['Tiempo'] == x_val]
+        df_estado = df_grouped[df_grouped['Estado'] == line.get_label()]
+        fecha_hora = df_estado[df_estado['Fecha y Hora']
+                               == x_val]['Fecha y Hora'].values[0]
 
-        # Formatear la fecha y hora
-        fecha_hora_formateada = pd.to_datetime(
-            x_val).strftime("%Y-%m-%d %H:%M:%S")
+        # Convertir numpy.datetime64 a datetime.datetime si es necesario
+        if isinstance(fecha_hora, pd.Timestamp):
+            fecha_hora = fecha_hora.to_pydatetime()
+        elif isinstance(fecha_hora, np.datetime64):
+            fecha_hora = pd.to_datetime(fecha_hora).to_pydatetime()
 
-        # Actualizar la anotación
+        # Formatear la fecha y hora en un formato más legible
+        fecha_hora_formateada = fecha_hora.strftime("%Y-%m-%d %H:%M:%S")
+
         annot.xy = (x_val, y_val)
-        text = f"{line.get_label()}\n{fecha_hora_formateada}\n{y_val_int}"
+        text = f"{line.get_label()}\n{fecha_hora_formateada}\n{y_val}"
         annot.set_text(text)
         annot.get_bbox_patch().set_alpha(0.8)
 
     # Función para manejar los eventos del mouse
-
     def hover(event):
         vis = annot.get_visible()
         if event.inaxes == ax:
@@ -483,12 +478,11 @@ def mostrar_grafico_historico(excel_path):
     fig.canvas.mpl_connect("motion_notify_event", hover)
 
     # Configurar los botones de selección
-    rax = plt.axes([0.4, 0.80, 0.2, 0.1])  # Posición del panel de checkboxes
-    labels = [line.get_label() for line in lines]
+    # Posición en la parte superior del gráfico
+    rax = plt.axes([0.4, 0.80, 0.2, 0.1])
+    labels = df_grouped['Estado'].unique()
     visibility = [line.get_visible() for line in lines]
     check = CheckButtons(rax, labels, visibility)
-
-    # Función para alternar la visibilidad de las líneas
 
     def func(label):
         for line in lines:
@@ -498,14 +492,8 @@ def mostrar_grafico_historico(excel_path):
 
     check.on_clicked(func)
 
-    # Rotar y ajustar las etiquetas del eje x para mejor legibilidad
-    plt.xticks(rotation=45, ha='right')
-
-    # Ajustar los márgenes para evitar que se corten las etiquetas
-    plt.tight_layout()
-    
     # Mostrar el gráfico
-    print("Mostrando Gráfico Histórico.")
+    print("Mostrando Gráficos Históricos.")
     plt.show()
 
 
