@@ -15,6 +15,8 @@ import time
 import os
 import re
 
+from grafico_estado import visualizar_estados
+
 
 def abrir_y_ejecutar_scanner(executable_path):
     # Inicia el programa
@@ -255,121 +257,6 @@ def exportar_a_excel(conteo_segmentos_estados, excel_path):
     print(f"Datos exportados exitosamente a {excel_path}")
 
 
-def mostrar_graficos(conteo_estado, conteo_segmentos_estados):
-    """Generar gráficos de barras, circular y de barras apiladas para el estado de los dispositivos."""
-
-    estado_order = ['Desconocido', 'Inactivo', 'Activado']
-    color_map = {'Desconocido': 'red',
-                 'Inactivo': 'orange',
-                 'Activado': 'green'}
-
-    # Asignar los colores a cada estado
-    colors = [color_map[estado] for estado in conteo_estado.index]
-
-    # Crear la figura y los subgráficos
-    fig, axs = plt.subplots(2, 2, figsize=(16, 14))
-
-    # Gráfico de barras
-    conteo_estado.plot(kind='bar', color=colors, ax=axs[0, 0])
-    axs[0, 0].set_title('Conteo de Dispositivos por Estado')
-    axs[0, 0].set_xlabel('')
-    axs[0, 0].set_ylabel('Número de Dispositivos')
-    axs[0, 0].set_xticklabels(conteo_estado.index, rotation=0)
-
-    # Añadir etiquetas a las barras
-    for i, v in enumerate(conteo_estado):
-        axs[0, 0].text(i, v, str(v), ha='center', va='bottom', fontsize='7')
-
-    # Gráfico circular
-    conteo_estado.plot(kind='pie', autopct='%1.1f%%',
-                       colors=colors, ax=axs[0, 1])
-    axs[0, 1].set_title('Distribución de Dispositivos por Estado')
-    axs[0, 1].set_ylabel('')
-
-    # Gráfico de barras apiladas
-    ax_stacked = fig.add_subplot(2, 1, 2)
-    plt.subplots_adjust(hspace=0.4)  # Aumentar el espacio entre gráficos
-    colors_segmento = [color_map[estado]
-                       for estado in conteo_segmentos_estados.columns]
-    bars = conteo_segmentos_estados.plot(
-        kind='bar', stacked=True, ax=ax_stacked, color=colors_segmento)
-    ax_stacked.set_title(
-        'Conteo de Dispositivos por Segmento de IP y Estado', pad=10)
-    ax_stacked.set_xlabel('Segmento de IP')
-    ax_stacked.set_ylabel('Número de Dispositivos')
-    ax_stacked.set_xticklabels(
-        conteo_segmentos_estados.index, rotation=45, ha='right')
-    ax_stacked.set_xlim(-0.5, len(conteo_segmentos_estados.index) - 0.5)
-
-    # Ajustar los límites del eje y para dar más espacio arriba
-    ylim = ax_stacked.get_ylim()
-    ax_stacked.set_ylim(ylim[0], ylim[1] * 1.1)
-
-    annot = ax_stacked.annotate("", xy=(0, 0), xytext=(20, 20), textcoords="offset points",
-                                bbox=dict(boxstyle="round", fc="lightyellow",
-                                          ec="orange", alpha=0.8, pad=0.5),
-                                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=.2", color="orange"))
-    annot.set_visible(False)
-
-    handles, labels = ax_stacked.get_legend_handles_labels()
-    ordered_handles = [handles[labels.index(
-        estado)] for estado in estado_order if estado in labels]
-    ax_stacked.legend(ordered_handles, estado_order,
-                      title='Estado', loc='upper left', bbox_to_anchor=(1, 1))
-
-    def update_annot(bar, segmento, estado, valor):
-        x = bar.get_x() + bar.get_width() / 2.
-        y = bar.get_y() + bar.get_height() / 2.
-
-        # Ajustar la posición vertical de la anotación
-        # Si la barra está en el 70% superior del gráfico
-        if y > ax_stacked.get_ylim()[1] * 0.7:
-            xytext = (20, -20)  # Colocar la anotación debajo de la barra
-        else:
-            xytext = (20, 20)  # Colocar la anotación encima de la barra
-
-        annot.xyann = xytext
-        annot.xy = (x, y)
-        text = f"{estado}: {valor}\n{segmento}"
-        annot.set_text(text)
-
-        # Ajustar el color de fondo según el estado
-        if estado == 'Activado':
-            annot.get_bbox_patch().set_facecolor('lightgreen')
-        elif estado == 'Inactivo':
-            annot.get_bbox_patch().set_facecolor('lightsalmon')
-        else:  # 'Desconocido'
-            annot.get_bbox_patch().set_facecolor('lightgray')
-
-        annot.get_bbox_patch().set_alpha(0.9)
-
-    def hover(event):
-        vis = annot.get_visible()
-        if event.inaxes == ax_stacked:
-            for i, estado_bars in enumerate(bars.containers):
-                for j, bar in enumerate(estado_bars):
-                    if bar.contains(event)[0]:
-                        segmento = conteo_segmentos_estados.index[j]
-                        estado = conteo_segmentos_estados.columns[i]
-                        valor = int(bar.get_height())
-                        update_annot(bar, segmento, estado, valor)
-                        annot.set_visible(True)
-                        fig.canvas.draw_idle()
-                        return
-        if vis:
-            annot.set_visible(False)
-            fig.canvas.draw_idle()
-
-    fig.canvas.mpl_connect("motion_notify_event", hover)
-
-    fig.subplots_adjust(hspace=0.3)
-    axs[1, 0].axis('off')
-    axs[1, 1].axis('off')
-
-    print(f"Mostrando Graficos de Datos Recientes.")
-    plt.show()
-
-
 def mostrar_grafico_historico(excel_path):
 
     def format_sheet_name(sheet_name):
@@ -537,44 +424,23 @@ def main():
     imagen_boton = r'C:\Users\jvargas\Phyton\proceso_ip\btn.png'
     nombre_proceso = "advanced_ip_scanner.exe"
 
-    abrir_y_ejecutar_scanner(executable_path)
-
-    resultado_escaner = esperar_termino_scanner(file_path, imagen_boton)
-    if resultado_escaner:
-
-        def procesar_datos(file_path, excel_path):
-            # Cargar datos desde el archivo CSV
-            df = cargar_datos(file_path)
-            if df is not None:
+    df = cargar_datos(file_path)
+    if df is not None:
                 # Mostrar gráficos actuales
                 conteo_estado, conteo_estado_porcentaje, conteo_segmentos_estados = calcular_conteos(
                     df)
 
-                # Exportar a Excel
-                exportar_a_excel(conteo_segmentos_estados, excel_path)
-
                 # Mostrar gráficos actuales
-                mostrar_graficos(conteo_estado, conteo_segmentos_estados)
+                #mostrar_graficos(conteo_estado, conteo_segmentos_estados)
+                #grafico_estados(excel_path)
 
+                visualizar_estados(excel_path)
                 # Mostrar gráficos historicos
                 mostrar_grafico_historico(excel_path)
-            else:
+    else:
                 print("No se pudieron cargar los datos.")
 
-        # Llamar a la función de procesamiento
-        procesar_datos(file_path, excel_path)
-
-        print(f"Proceso completado exitosamente")
-        terminar_proceso(nombre_proceso)
-
-        # Calcular la próxima hora
-        proxima_hora = datetime.now() + timedelta(hours=2)
-        print()  # Espacio en blanco
-        print(f"Siguiente Escaneo a las {
-              proxima_hora.strftime('%H:%M')} horas.")
-
-    else:
-        print("El proceso no pudo completarse.")
+        
 
 
 if __name__ == "__main__":
