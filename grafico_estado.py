@@ -53,7 +53,7 @@ def _generar_texto_comparativo(estado, actual, anterior):
     if abs(cambio) < 1:
         return f"{estado}: Sin cambios significativos"
     direccion = "más" if cambio > 0 else "menos"
-    return f"{abs(cambio):.1f}% {direccion} que ayer"
+    return f"{abs(cambio):.1f}% {direccion} que el anterior"
 
 
 def mostrar_graficos(df_actual, df_anterior=None):
